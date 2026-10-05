@@ -9,7 +9,7 @@ from PySide6.QtCore import QProcess, QTimer, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QMainWindow, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
 )
 
 CPU_NAMES = {"silent": "Silent", "balanced": "Balanced", "performance": "Performance"}
@@ -32,12 +32,14 @@ class MainWindow(QMainWindow):
         self.backend = backend
         self.data = None
         self.dirty = False
+        self.charge_dirty = False
         self.busy = False
+        self.apply_action = None
         self.syncing = False
         self.last_output = ""
         self.setWindowTitle("ASUS Power Control")
         self.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.svg"))))
-        self.resize(650, 590)
+        self.resize(650, 760)
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
@@ -64,6 +66,44 @@ class MainWindow(QMainWindow):
         layout.addLayout(choices)
         self.cpu.currentIndexChanged.connect(self.selection_changed)
         self.gpu.currentIndexChanged.connect(self.selection_changed)
+
+        charge_group = QGroupBox("Battery charge limit")
+        charge_layout = QVBoxLayout(charge_group)
+        charge_header = QHBoxLayout()
+        charge_header.addWidget(QLabel("Stop charging at"))
+        charge_header.addStretch()
+        self.charge_value = QLabel("—")
+        font = self.charge_value.font()
+        font.setBold(True)
+        self.charge_value.setFont(font)
+        charge_header.addWidget(self.charge_value)
+        charge_layout.addLayout(charge_header)
+        charge_range = QHBoxLayout()
+        charge_range.addWidget(QLabel("60%"))
+        self.charge_slider = QSlider(Qt.Orientation.Horizontal)
+        self.charge_slider.setRange(60, 100)
+        self.charge_slider.setSingleStep(1)
+        self.charge_slider.setPageStep(5)
+        self.charge_slider.setTickInterval(10)
+        self.charge_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.charge_slider.setAccessibleName("Battery charge limit, 60 to 100 percent")
+        self.charge_slider.setToolTip("Lowering the limit stops further charging; it does not discharge the battery.")
+        self.charge_slider.valueChanged.connect(self.charge_selection_changed)
+        charge_range.addWidget(self.charge_slider)
+        charge_range.addWidget(QLabel("100%"))
+        charge_layout.addLayout(charge_range)
+        charge_footer = QHBoxLayout()
+        self.current_charge = QLabel("Current limit: reading…")
+        self.current_charge.setWordWrap(True)
+        charge_footer.addWidget(self.current_charge, 1)
+        self.charge_button = QPushButton("Save limit")
+        self.charge_button.clicked.connect(self.save_charge_limit)
+        charge_footer.addWidget(self.charge_button)
+        charge_layout.addLayout(charge_footer)
+        charge_note = QLabel("Saved through ASUS controls; retained across reboot and power-source changes.")
+        charge_note.setWordWrap(True)
+        charge_layout.addWidget(charge_note)
+        layout.addWidget(charge_group)
 
         state_group = QGroupBox("Live status")
         state_layout = QFormLayout(state_group)
@@ -150,11 +190,20 @@ class MainWindow(QMainWindow):
         valid = self.data is not None and not self.busy
         self.cpu.setEnabled(valid)
         self.gpu.setEnabled(valid)
+        charge = self.data.get("charge_limit") if self.data else None
+        charge_available = isinstance(charge, int) and 0 <= charge <= 100
+        self.charge_slider.setEnabled(valid and charge_available)
+        self.charge_button.setEnabled(valid and charge_available)
         self.refresh_button.setEnabled(not self.busy)
         ultimate = self.gpu.findData("ultimate")
         allowed = bool(self.data and self.data["ac"])
         self.gpu.model().item(ultimate).setEnabled(allowed)
         self.apply_button.setEnabled(valid and (self.gpu.currentData() != "ultimate" or allowed))
+
+    def charge_selection_changed(self, value):
+        self.charge_value.setText(f"{value}%")
+        if not self.syncing:
+            self.charge_dirty = True
 
     def refresh(self):
         if self.busy or self.status_process.state() != QProcess.ProcessState.NotRunning:
@@ -198,6 +247,16 @@ class MainWindow(QMainWindow):
                                  f"{data['display_gpu']} display")
         self.gpu_power.setText("Verified off — D3cold + video memory off" if data["power_off_verified"]
                                else f"{data['gpu_power']} • Video memory: {data['video_memory']}")
+        charge = data.get("charge_limit")
+        if isinstance(charge, int) and 0 <= charge <= 100:
+            self.current_charge.setText(f"Current limit: {charge}%")
+            if not self.charge_dirty:
+                self.syncing = True
+                self.charge_slider.setValue(charge)
+                self.charge_value.setText(f"{self.charge_slider.value()}%")
+                self.syncing = False
+        else:
+            self.current_charge.setText("Current limit: unavailable — check Details")
         if data["pending_reboot"]:
             target = GPU_NAMES.get(data["pending_gpu"], "GPU firmware change")
             self.pending.setText(f"{target} requested — reboot required. "
@@ -220,39 +279,57 @@ class MainWindow(QMainWindow):
     def apply_selection(self):
         if not self.apply_button.isEnabled():
             return
+        self.start_apply(["custom", self.cpu.currentData(), self.gpu.currentData()], "modes")
+
+    def save_charge_limit(self):
+        if not self.charge_button.isEnabled():
+            return
+        self.start_apply(["charge-limit", str(self.charge_slider.value())], "charge")
+
+    def start_apply(self, arguments, action):
         # Finish the read-only lookup before starting mutations to avoid stale UI.
         if self.status_process.state() != QProcess.ProcessState.NotRunning:
             self.status_timeout.stop()
             self.status_process.kill()
             self.status_process.waitForFinished(1000)
         self.busy = True
+        self.apply_action = action
         self.update_controls()
-        self.message.setText("Applying choices… Complete the KDE administrator prompt if it appears.")
-        self.apply_process.start(self.backend, ["custom", self.cpu.currentData(), self.gpu.currentData()])
+        self.message.setText(("Saving charge limit… " if action == "charge" else "Applying choices… ") +
+                             "Complete the KDE administrator prompt if it appears.")
+        self.apply_process.start(self.backend, arguments)
 
     def apply_error(self, error):
         if error == QProcess.ProcessError.FailedToStart:
             self.busy = False
+            self.apply_action = None
             self.message.setText("Could not apply choices: " + self.apply_process.errorString())
             self.update_controls()
 
     def apply_finished(self, code, exit_status):
+        action = self.apply_action
+        self.apply_action = None
         self.busy = False
         self.last_output = bytes(self.apply_process.readAllStandardOutput()).decode("utf-8", errors="replace").strip()
         if code == 0 and exit_status == QProcess.ExitStatus.NormalExit:
-            self.dirty = False
-            if "REBOOT REQUIRED" in self.last_output:
+            if action == "charge":
+                self.charge_dirty = False
+                self.message.setText(f"Charge limit saved at {self.charge_slider.value()}%. No reboot needed.")
+            elif "REBOOT REQUIRED" in self.last_output:
+                self.dirty = False
                 self.message.setText("Choices saved. Save your work and reboot normally to finish the GPU switch.")
                 QMessageBox.information(self, "GPU switch needs a reboot",
                                         "Your CPU profile is applied. The GPU MUX request is queued.\n\n"
                                         "Save your work and reboot when ready. The app will not reboot for you.")
             else:
+                self.dirty = False
                 self.message.setText("Choices applied. NVIDIA power-down may take around 25 seconds "
                                      "after existing GPU workloads release it.")
         else:
             message = self.last_output or "Authentication was cancelled or the helper failed."
-            self.message.setText("Choices were not fully applied. See Details and check live status.")
-            QMessageBox.warning(self, "Could not apply choices", message)
+            self.message.setText("Could not save or verify the charge limit. See Details and live status." if
+                                 action == "charge" else "Choices were not fully applied. See Details and check live status.")
+            QMessageBox.warning(self, "Could not save charge limit" if action == "charge" else "Could not apply choices", message)
         self.update_controls()
         self.refresh()
 

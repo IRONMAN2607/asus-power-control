@@ -50,6 +50,17 @@ The GUI's live Apply flow was tested on KDE Wayland. Simulated tests cover mode
 combinations, queued request cancellation, boot persistence, unplug races, and
 never blocking NVIDIA while it still drives the internal panel.
 
+## Charge-limit slider verification — 2026-10-06
+
+- The slider range is **60–100%**, with 1% steps and a separate Save limit action.
+- All **42 policy, UI, and installer tests passed**, including invalid-input
+  rejection, readback failures, cancelled authentication, and independent controls.
+- A live Wayland GUI save successfully reapplied the existing **70%** cap.
+- ASUS D-Bus, the battery's kernel threshold, and `asusctl battery info` all
+  reported 70%; asusd's stored current and base charge limits both remained 70%.
+- Performance/Hybrid intent, Intel display routing, and idle RTX D3cold/VRAM Off
+  were observed after saving, with no pending firmware change.
+
 ## Check a reinstalled system
 
 ```bash

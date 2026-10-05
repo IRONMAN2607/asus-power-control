@@ -19,6 +19,9 @@ SELF = "/usr/local/bin/asus-power-mode"
 BUS = "xyz.ljones.Asusd"
 IFACE = "xyz.ljones.AsusArmoury"
 GPU_PCI = "0000:01:00.0"
+CHARGE_PATH = "/xyz/ljones"
+CHARGE_IFACE = "xyz.ljones.Platform"
+CHARGE_PROPERTY = "ChargeControlEndThreshold"
 ALIASES = {"asus-gaming-mode": "gaming", "asus-battery-mode": "battery"}
 CPU_PROFILES = {"silent": "power-saver", "balanced": "balanced", "performance": "performance"}
 GPU_MODES = {"integrated", "hybrid", "ultimate"}
@@ -27,7 +30,7 @@ PRESETS = {
     "normal": ("performance", "hybrid"),
     "gaming": ("performance", "ultimate"),
 }
-MODES = {*PRESETS, "auto", "custom", "status", "status-json"}
+MODES = {*PRESETS, "auto", "custom", "charge-limit", "status", "status-json"}
 
 
 def run(*args):
@@ -121,6 +124,40 @@ def set_profile(cpu):
         raise RuntimeError(f"Power profile did not become {profile}")
 
 
+def charge_limit():
+    value = run("/usr/bin/busctl", "--system", "get-property", BUS,
+                CHARGE_PATH, CHARGE_IFACE, CHARGE_PROPERTY)
+    try:
+        limit = int(value.split()[-1])
+    except (ValueError, IndexError) as error:
+        raise RuntimeError("ASUS returned an invalid battery charge limit") from error
+    if not 0 <= limit <= 100:
+        raise RuntimeError("ASUS returned an invalid battery charge limit")
+    return limit
+
+
+def validate_charge_limit(value):
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("Battery charge limit must be an integer from 60 to 100") from error
+    if str(limit) != str(value) or not 60 <= limit <= 100:
+        raise RuntimeError("Battery charge limit must be an integer from 60 to 100")
+    return limit
+
+
+def set_charge_limit(value):
+    limit = validate_charge_limit(value)
+    with open("/run/asus-power-mode.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # The native limit command persists the base limit in asusd's config.
+        # Always submit it, even at the current value, to replace one-shot limits.
+        run("/usr/bin/asusctl", "battery", "limit", str(limit))
+        if charge_limit() != limit:
+            raise RuntimeError("ASUS did not apply the requested battery charge limit")
+    print(f"Battery charge limit saved: {limit}%.")
+
+
 def resolve_request(requested, previous, ac, cpu=None, gpu=None):
     """Keep manual choices on the same source; real source changes use presets."""
     mode = requested
@@ -182,6 +219,11 @@ def snapshot():
     gpu_power = "unavailable"
     blocked = None
     errors = []
+    try:
+        battery_limit = charge_limit()
+    except RuntimeError as error:
+        battery_limit = None
+        errors.append(str(error))
     for gpu_id, item in gpus.items():
         if item.get("pci") == GPU_PCI:
             blocked = item.get("blocked")
@@ -213,6 +255,7 @@ def snapshot():
         "gpu_blocked": blocked, "gpu_power": gpu_power, "video_memory": memory,
         "power_off_verified": gpu_power.lower() == "d3cold" and memory == "Off",
         "pending_reboot": pending, "pending_gpu": pending_gpu, "errors": errors,
+        "charge_limit": battery_limit,
         "selection": {"cpu": cpu, "gpu": pending_gpu or active_gpu},
     }
 
@@ -224,6 +267,8 @@ def status():
     print(f"Fedora profile: {data['profile']}")
     print(f"ASUS platform profile: {data['platform_profile']}")
     print(f"CPU EPP: {data['cpu_epp']}")
+    battery_limit = data["charge_limit"]
+    print("Battery charge limit: " + (f"{battery_limit}%" if battery_limit is not None else "unavailable"))
     for name, values in data["firmware"].items():
         print(f"{name}: active={values['active']}, queued={values['queued']}")
     print(f"Cardwire mode: {run('/usr/bin/cardwire', 'get')}")
@@ -275,17 +320,22 @@ def main():
     mode = ALIASES.get(Path(sys.argv[0]).name)
     args = sys.argv[1:]
     cpu = gpu = None
+    limit = None
     if mode is None:
         if args and args[0] == "custom" and len(args) == 3:
             mode, cpu, gpu = args
             if cpu not in CPU_PROFILES or gpu not in GPU_MODES:
                 raise RuntimeError("Invalid CPU/GPU selection")
-        elif len(args) == 1 and args[0] in MODES - {"custom"}:
+        elif args and args[0] == "charge-limit" and len(args) == 2:
+            mode = "charge-limit"
+            limit = validate_charge_limit(args[1])
+        elif len(args) == 1 and args[0] in MODES - {"custom", "charge-limit"}:
             mode = args[0]
         else:
             print("Usage: asus-power-mode {gaming|battery|normal|status|status-json|auto}\n"
                   "       asus-power-mode custom {silent|balanced|performance} "
-                  "{integrated|hybrid|ultimate}", file=sys.stderr)
+                  "{integrated|hybrid|ultimate}\n"
+                  "       asus-power-mode charge-limit <60-100>", file=sys.stderr)
             return 2
     elif args:
         print("This command takes no arguments", file=sys.stderr)
@@ -295,14 +345,19 @@ def main():
     elif mode == "status-json":
         print(json.dumps(snapshot()))
     else:
-        if mode != "auto":
+        if mode not in {"auto", "charge-limit"}:
             resolve_request(mode, {}, on_ac(), cpu, gpu)
         if os.geteuid() != 0:
             elevation = ["pkexec", SELF, mode]
             if mode == "custom":
                 elevation.extend((cpu, gpu))
+            elif mode == "charge-limit":
+                elevation.append(str(limit))
             os.execv("/usr/bin/pkexec", elevation)
-        apply(mode, cpu, gpu)
+        if mode == "charge-limit":
+            set_charge_limit(limit)
+        else:
+            apply(mode, cpu, gpu)
     return 0
 
 

@@ -267,6 +267,8 @@ def preflight(system=False):
         for prop in ("CurrentValue", "QueuedGpuValue"):
             command("busctl", "--system", "get-property", "xyz.ljones.Asusd",
                     f"/xyz/ljones/asus_armoury/{name}", "xyz.ljones.AsusArmoury", prop)
+    command("busctl", "--system", "get-property", "xyz.ljones.Asusd", "/xyz/ljones",
+            "xyz.ljones.Platform", "ChargeControlEndThreshold")
     for unit in SERVICES[1:5]:
         if command("systemctl", "show", "--property=LoadState", "--value", unit) == "not-found":
             if unit != "asus-power-source.service":

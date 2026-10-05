@@ -19,6 +19,7 @@ loader.exec_module(backend)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(ROOT))
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QByteArray, QProcess
 from asus_power_control import MainWindow
 
 
@@ -36,6 +37,8 @@ class Hardware:
         self.saved = Mock()
         self.power = "D3cold"
         self.memory = "Off"
+        self.charge_limit = 70
+        self.base_charge_limit = 70
 
     def gpu_map(self):
         nvidia_panel = self.firmware["gpu_mux_mode"]["CurrentValue"] == 0
@@ -48,6 +51,8 @@ class Hardware:
     def run(self, *args):
         self.commands.append(args)
         program = Path(args[0]).name
+        if program == "busctl" and args[-1] == backend.CHARGE_PROPERTY:
+            return f"y {self.charge_limit}"
         if program == "powerprofilesctl":
             if args[1] == "set":
                 self.profile = args[2]
@@ -62,6 +67,9 @@ class Hardware:
             if args[1] == "gpu":
                 return self.power
         if program == "asusctl":
+            if args[1:3] == ("battery", "limit"):
+                self.charge_limit = self.base_charge_limit = int(args[3])
+                return ""
             name, value = args[3], int(args[4])
             self.firmware[name]["QueuedGpuValue"] = (
                 -1 if self.firmware[name]["CurrentValue"] == value else value)
@@ -195,6 +203,71 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(data["pending_reboot"])
 
 
+class ChargeLimitTests(unittest.TestCase):
+    def test_both_slider_bounds_save_without_changing_cpu_gpu_or_policy(self):
+        for limit in (60, 100):
+            with self.subTest(limit=limit):
+                hw = Hardware(mux=0, cardwire=1)
+                previous = hw.settings.copy()
+                with hw.patches():
+                    backend.set_charge_limit(limit)
+                self.assertEqual(hw.charge_limit, limit)
+                self.assertEqual(hw.base_charge_limit, limit)
+                self.assertEqual(hw.profile, "power-saver")
+                self.assertEqual(hw.cardwire, 1)
+                self.assertEqual(hw.firmware["gpu_mux_mode"]["CurrentValue"], 0)
+                self.assertEqual(hw.firmware["gpu_mux_mode"]["QueuedGpuValue"], -1)
+                self.assertEqual(hw.settings, previous)
+                hw.saved.assert_not_called()
+                self.assertIn(("/usr/bin/asusctl", "battery", "limit", str(limit)), hw.commands)
+
+    def test_invalid_values_never_reach_hardware(self):
+        for limit in (59, 101, None, True, "70.5", 70.5, "70; reboot"):
+            with self.subTest(limit=limit):
+                hw = Hardware()
+                with hw.patches(), self.assertRaises(RuntimeError):
+                    backend.set_charge_limit(limit)
+                self.assertFalse(hw.commands)
+
+    def test_resaving_current_one_shot_limit_makes_it_the_persistent_base(self):
+        hw = Hardware()
+        hw.charge_limit, hw.base_charge_limit = 100, 70
+        with hw.patches():
+            backend.set_charge_limit(100)
+        self.assertEqual(hw.base_charge_limit, 100)
+        self.assertIn(("/usr/bin/asusctl", "battery", "limit", "100"), hw.commands)
+
+    def test_failed_readback_does_not_report_success(self):
+        hw = Hardware()
+        with hw.patches(), patch.object(backend, "charge_limit", return_value=60):
+            with self.assertRaisesRegex(RuntimeError, "did not apply"):
+                backend.set_charge_limit(70)
+        hw.saved.assert_not_called()
+
+    def test_unavailable_charge_interface_keeps_cpu_gpu_status_usable(self):
+        hw = Hardware()
+        with hw.patches(), patch.object(backend, "charge_limit", side_effect=RuntimeError("charge unavailable")):
+            data = backend.snapshot()
+        self.assertIsNone(data["charge_limit"])
+        self.assertEqual(data["gpu_mode"], "integrated")
+        self.assertIn("charge unavailable", data["errors"])
+
+    def test_invalid_cli_argument_is_rejected_before_authentication(self):
+        with patch.object(backend.sys, "argv", [backend.SELF, "charge-limit", "101"]), \
+                patch.object(backend.os, "execv") as elevate, self.assertRaises(RuntimeError):
+            backend.main()
+        elevate.assert_not_called()
+
+    def test_cli_elevates_only_the_fixed_charge_command_without_ac_requirement(self):
+        with patch.object(backend.sys, "argv", [backend.SELF, "charge-limit", "80"]), \
+                patch.object(backend.os, "geteuid", return_value=1000), \
+                patch.object(backend.os, "execv", side_effect=SystemExit(0)) as elevate, \
+                patch.object(backend, "on_ac") as on_ac, self.assertRaises(SystemExit):
+            backend.main()
+        elevate.assert_called_once_with("/usr/bin/pkexec", ["pkexec", backend.SELF, "charge-limit", "80"])
+        on_ac.assert_not_called()
+
+
 class GuiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -243,6 +316,67 @@ class GuiTests(unittest.TestCase):
     def test_live_off_evidence_is_visible(self):
         self.assertIn("Verified off", self.window.gpu_power.text())
         self.assertIn("D3cold", self.window.gpu_power.text())
+
+    def test_slider_loads_actual_limit_and_has_exact_requested_range(self):
+        self.assertEqual(self.window.charge_slider.minimum(), 60)
+        self.assertEqual(self.window.charge_slider.maximum(), 100)
+        self.assertEqual(self.window.charge_slider.value(), 70)
+        self.assertEqual(self.window.charge_value.text(), "70%")
+        self.assertIn("70%", self.window.current_charge.text())
+        self.assertFalse(self.window.charge_dirty)
+
+    def test_refresh_preserves_unsaved_charge_choice_but_updates_current_limit(self):
+        self.window.charge_slider.setValue(85)
+        self.window.display_status({**self.data, "charge_limit": 75})
+        self.assertEqual(self.window.charge_slider.value(), 85)
+        self.assertEqual(self.window.charge_value.text(), "85%")
+        self.assertIn("75%", self.window.current_charge.text())
+
+    def test_saving_charge_uses_separate_arguments_and_keeps_unapplied_cpu_choice(self):
+        self.window.cpu.setCurrentIndex(self.window.cpu.findData("balanced"))
+        self.window.charge_slider.setValue(80)
+        with patch.object(self.window.apply_process, "start") as start:
+            self.window.save_charge_limit()
+            start.assert_called_once_with("/usr/local/bin/asus-power-mode", ["charge-limit", "80"])
+        self.assertEqual(self.window.apply_action, "charge")
+        self.assertTrue(self.window.dirty)
+        self.window.busy = False
+
+    def test_unavailable_charge_read_disables_only_charge_controls(self):
+        self.window.display_status({**self.data, "charge_limit": None})
+        self.assertFalse(self.window.charge_slider.isEnabled())
+        self.assertFalse(self.window.charge_button.isEnabled())
+        self.assertTrue(self.window.apply_button.isEnabled())
+
+    def test_loading_out_of_range_existing_limit_does_not_write_it(self):
+        with patch.object(self.window.apply_process, "start") as start:
+            self.window.display_status({**self.data, "charge_limit": 50})
+        self.assertEqual(self.window.charge_slider.value(), 60)
+        self.assertIn("50%", self.window.current_charge.text())
+        start.assert_not_called()
+
+    def test_successful_charge_save_does_not_discard_unapplied_cpu_gpu_choices(self):
+        self.window.cpu.setCurrentIndex(self.window.cpu.findData("balanced"))
+        self.window.charge_slider.setValue(80)
+        self.window.apply_action = "charge"
+        with patch.object(self.window.apply_process, "readAllStandardOutput",
+                          return_value=QByteArray(b"Battery charge limit saved: 80%.")), \
+                patch.object(self.window, "refresh"):
+            self.window.apply_finished(0, QProcess.ExitStatus.NormalExit)
+        self.assertTrue(self.window.dirty)
+        self.assertFalse(self.window.charge_dirty)
+        self.assertIn("80%", self.window.message.text())
+
+    def test_cancelled_charge_save_keeps_the_unsaved_slider_choice(self):
+        self.window.charge_slider.setValue(80)
+        self.window.apply_action = "charge"
+        with patch.object(self.window.apply_process, "readAllStandardOutput",
+                          return_value=QByteArray(b"Authentication cancelled")), \
+                patch.object(self.window, "refresh"), patch("asus_power_control.QMessageBox.warning"):
+            self.window.apply_finished(126, QProcess.ExitStatus.NormalExit)
+        self.assertTrue(self.window.charge_dirty)
+        self.assertEqual(self.window.charge_slider.value(), 80)
+        self.assertIn("70%", self.window.current_charge.text())
 
 
 if __name__ == "__main__":

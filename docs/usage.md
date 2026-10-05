@@ -25,6 +25,23 @@ Choose a **CPU mode** and **GPU mode**, then click **Apply**:
 The selectors are independent: e.g. Balanced + Integrated or Silent + Hybrid.
 Changing a GPU selection does not force a particular CPU profile.
 
+## Battery charge limit
+
+The **Battery charge limit** slider ranges from **60% to 100%**, in 1% steps.
+It reads the current ASUS limit when the app opens and displays the applied
+limit separately from your unsaved slider choice. Move it and click **Save limit**
+to persist the new cap. Administrator authentication may appear.
+
+Saving takes effect without reboot and is independent of CPU/GPU Apply. ASUS
+retains it across reboot and AC/battery changes. If the battery is already above
+the new limit, it stops further charging rather than actively discharging.
+
+CLI equivalent:
+
+```sh
+asus-power-mode charge-limit 80
+```
+
 ## Reboots and power-off evidence
 
 Entering or leaving Ultimate queues a firmware MUX change for the ASUS shutdown
@@ -70,6 +87,7 @@ stops those lookups; the GUI is not required for boot or AC/battery policy.
 ```sh
 asus-power-mode status
 asus-power-mode status-json
+asus-power-mode charge-limit 80
 asus-power-mode custom balanced integrated
 asus-power-mode custom performance hybrid
 asus-power-mode custom performance ultimate

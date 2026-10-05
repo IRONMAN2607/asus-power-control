@@ -120,9 +120,11 @@ python3 install.py --battery-display-settings
 It sets battery brightness to 32%, dimming after 120 seconds, and display-off
 after 300 seconds. Lid, suspend, power-button and AC display choices are retained.
 
-The installer preserves the existing ASUS charging limit. Use `asusctl battery
---help` to set your preferred limit (the reference machine used 70%). For a
-one-time full charge before travelling, `asusctl battery oneshot` is supported.
+The installer preserves the existing ASUS charging limit. In the app, use the
+**60–100% Battery charge limit** slider and **Save limit** to choose your preferred
+cap (the reference machine used 70%). The CLI equivalent is
+`asus-power-mode charge-limit 70`. For a one-time full charge before travelling,
+`asusctl battery oneshot` is supported.
 
 ## 5. Verify modes
 

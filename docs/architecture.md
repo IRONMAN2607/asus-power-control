@@ -34,6 +34,17 @@ Custom intent survives boot on the same power source. A genuine source change
 uses the corresponding battery/AC preset. If AC disappears during an Ultimate
 request, the helper reconciles toward battery instead.
 
+## Battery charging
+
+The GUI's separate Save limit action submits `asus-power-mode charge-limit <60-100>`.
+The helper validates the integer range before authentication, serializes through
+the same lock, and uses `asusctl battery limit` for persistent ASUS configuration.
+It verifies the applied `xyz.ljones.Platform.ChargeControlEndThreshold` D-Bus
+property before reporting success. CPU/GPU intent is not involved in this action.
+
+Status reports the live `charge_limit` property. An unavailable charging
+interface disables the slider while leaving the CPU/GPU controls usable.
+
 ## GPU routing
 
 | Mode | dgpu_disable | gpu_mux_mode | Cardwire |

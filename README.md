@@ -1,7 +1,8 @@
 # ASUS Power Control
 
 A small Linux/KDE application with independent **CPU performance** and **GPU
-mode** selectors, plus the boot/AC/battery policy needed to reinstall the setup.
+mode** selectors, a **60–100% battery charge-limit slider**, and the boot/AC/battery
+policy needed to reinstall the setup.
 
 Built and verified on an **ASUS TUF Dash F15 FX517ZC**, Intel i5-12450H + NVIDIA
 RTX 3050 Laptop GPU, running **Fedora 44 KDE Wayland**.
@@ -33,6 +34,18 @@ and pending modes separately. Integrated ↔ Hybrid normally needs no reboot.
 - GPU shutdown is verified using **D3cold + Video Memory Off**.
 - The application preserves the selected display refresh rate. The verified
   machine uses **1920×1080 at 144 Hz** in every mode.
+
+## Battery charge limit
+
+Move the slider to a limit between **60% and 100%**, in 1% steps, then click
+**Save limit**. The panel shows both your selected value and the current applied
+limit. ASUS saves the limit persistently, including across reboot and AC/battery
+changes. Saving the charge limit is independent of the CPU/GPU Apply button and
+does not require a reboot.
+
+The slider initializes from the actual ASUS limit. Loading the app or moving
+the slider does not change charging until you save. Lowering the cap stops
+further charging; it does not discharge a battery already above that value.
 
 ## Reinstall after reinstalling Linux
 
@@ -86,8 +99,8 @@ python3 install.py --battery-display-settings
 ```
 
 Set the panel to **144 Hz** once in KDE Display Configuration after a fresh OS
-install. The CPU/GPU commands do not change it. Charging limits are preserved;
-set your preferred limit through `asusctl` as described in the reinstall guide.
+install. The CPU/GPU commands do not change it. The installer preserves charging
+limits; use the GUI slider to save your preferred limit afterward.
 
 ## What is included
 
@@ -111,6 +124,7 @@ models/distributions need adaptation rather than copying these hardware values.
 ```bash
 asus-power-mode status
 asus-power-mode status-json
+asus-power-mode charge-limit 80
 asus-power-mode custom balanced integrated
 asus-power-mode custom performance hybrid
 asus-power-mode custom performance ultimate
