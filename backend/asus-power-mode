@@ -1,0 +1,314 @@
+#!/usr/bin/python3
+"""FX517ZC policy: PPD owns CPU profiles; Cardwire owns runtime GPU blocking.
+
+Firmware MUX changes are deferred by asusctl until orderly shutdown. Nothing
+here reboots, logs out, restarts the display server, or changes refresh rates.
+"""
+
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+STATE_DIR = Path("/var/lib/asus-power-mode")
+STATE_FILE = STATE_DIR / "intent.json"
+SELF = "/usr/local/bin/asus-power-mode"
+BUS = "xyz.ljones.Asusd"
+IFACE = "xyz.ljones.AsusArmoury"
+GPU_PCI = "0000:01:00.0"
+ALIASES = {"asus-gaming-mode": "gaming", "asus-battery-mode": "battery"}
+CPU_PROFILES = {"silent": "power-saver", "balanced": "balanced", "performance": "performance"}
+GPU_MODES = {"integrated", "hybrid", "ultimate"}
+PRESETS = {
+    "battery": ("silent", "integrated"),
+    "normal": ("performance", "hybrid"),
+    "gaming": ("performance", "ultimate"),
+}
+MODES = {*PRESETS, "auto", "custom", "status", "status-json"}
+
+
+def run(*args):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=40)
+    if result.returncode:
+        raise RuntimeError(f"{' '.join(args)}: {result.stderr.strip() or result.stdout.strip()}")
+    return result.stdout.strip()
+
+
+def read(path):
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return "unreadable"
+
+
+def on_ac():
+    value = read("/sys/class/power_supply/ACAD/online")
+    if value not in {"0", "1"}:
+        raise RuntimeError("Cannot determine ACAD power state; no GPU policy applied")
+    return value == "1"
+
+
+def state():
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except FileNotFoundError:
+        return {}
+
+
+def save_state(mode, ac, cpu=None, gpu=None):
+    settings = {"mode": mode, "last_ac": ac}
+    if mode == "custom":
+        settings.update(cpu=cpu, gpu=gpu)
+    with tempfile.NamedTemporaryFile(mode="w", dir=STATE_DIR, delete=False) as tmp:
+        path = Path(tmp.name)
+        json.dump(settings, tmp)
+        tmp.write("\n")
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    path.chmod(0o644)
+    path.replace(STATE_FILE)
+
+
+def attr(name, property_name):
+    value = run("/usr/bin/busctl", "--system", "get-property", BUS,
+                f"/xyz/ljones/asus_armoury/{name}", IFACE, property_name)
+    return int(value.split()[-1])
+
+
+def request_attr(name, value):
+    current = attr(name, "CurrentValue")
+    queued = attr(name, "QueuedGpuValue")
+    if queued == value or (queued == -1 and current == value):
+        return
+    # Setting the active value also clears an opposing deferred request.
+    run("/usr/bin/asusctl", "armoury", "set", name, str(value))
+    if attr(name, "CurrentValue") != value and attr(name, "QueuedGpuValue") != value:
+        raise RuntimeError(f"ASUS did not accept {name}={value}")
+
+
+def gpu_map():
+    return json.loads(run("/usr/bin/cardwire", "list", "--json"))
+
+
+def nvidia_drives_panel(gpus):
+    return any(gpu.get("default") and gpu.get("pci") == GPU_PCI
+               for gpu in gpus.values())
+
+
+def cardwire_mode():
+    value = run("/usr/bin/busctl", "--system", "get-property",
+                "org.opengamingcollective.cardwire", "/org/opengamingcollective/cardwire",
+                "org.opengamingcollective.cardwire.Mode", "Mode")
+    return int(value.split()[-1])
+
+
+def set_cardwire(mode):
+    expected = {"integrated": 0, "hybrid": 1}[mode]
+    if cardwire_mode() != expected:
+        run("/usr/bin/cardwire", "set", mode)
+    if cardwire_mode() != expected:
+        raise RuntimeError(f"Cardwire did not enter {mode}")
+
+
+def set_profile(cpu):
+    profile = CPU_PROFILES[cpu]
+    if run("/usr/bin/powerprofilesctl", "get") != profile:
+        run("/usr/bin/powerprofilesctl", "set", profile)
+    if run("/usr/bin/powerprofilesctl", "get") != profile:
+        raise RuntimeError(f"Power profile did not become {profile}")
+
+
+def resolve_request(requested, previous, ac, cpu=None, gpu=None):
+    """Keep manual choices on the same source; real source changes use presets."""
+    mode = requested
+    if mode == "auto":
+        mode = previous.get("mode", "normal" if ac else "battery")
+        if previous.get("last_ac") != ac:
+            mode = "normal" if ac else "battery"
+        if mode == "custom":
+            cpu, gpu = previous.get("cpu"), previous.get("gpu")
+            if not ac and gpu == "ultimate":
+                mode = "battery"
+        elif not ac:
+            mode = "battery"
+    if mode in PRESETS:
+        cpu, gpu = PRESETS[mode]
+    elif mode != "custom":
+        raise RuntimeError(f"Invalid saved mode: {mode}")
+    if cpu not in CPU_PROFILES or gpu not in GPU_MODES:
+        raise RuntimeError("Choose CPU silent/balanced/performance and GPU integrated/hybrid/ultimate")
+    if not ac and (gpu == "ultimate" or mode == "normal"):
+        raise RuntimeError("Ultimate/gaming and the normal AC preset require the AC adapter")
+    return mode, cpu, gpu
+
+
+def apply_gpu(gpu):
+    gpus = gpu_map()
+    if not any(item.get("default") for item in gpus.values()):
+        raise RuntimeError("Cannot identify the display GPU; refusing GPU mode change")
+    nvidia_panel = nvidia_drives_panel(gpus)
+    # Unblock before requesting Ultimate. Never block the current panel's GPU.
+    if gpu != "integrated" or nvidia_panel:
+        set_cardwire("hybrid")
+    request_attr("dgpu_disable", 0)
+    request_attr("gpu_mux_mode", 0 if gpu == "ultimate" else 1)
+    if gpu == "integrated":
+        if nvidia_panel:
+            print("NVIDIA still drives the panel: GPU power-off requires the requested reboot.")
+        else:
+            set_cardwire("integrated")
+
+
+def snapshot():
+    ac = on_ac()
+    settings = state()
+    profile = run("/usr/bin/powerprofilesctl", "get")
+    firmware = {name: {"active": attr(name, "CurrentValue"),
+                       "queued": attr(name, "QueuedGpuValue")}
+                for name in ("dgpu_disable", "gpu_mux_mode")}
+    mode = cardwire_mode()
+    gpus = gpu_map()
+    nvidia_panel = nvidia_drives_panel(gpus)
+    intel_panel = any(item.get("default") and item.get("vendor") == "Intel"
+                      for item in gpus.values())
+    active_gpu = "unknown"
+    if nvidia_panel and firmware["gpu_mux_mode"]["active"] == 0:
+        active_gpu = "ultimate"
+    elif intel_panel and firmware["gpu_mux_mode"]["active"] == 1:
+        active_gpu = {0: "integrated", 1: "hybrid"}.get(mode, "unknown")
+    gpu_power = "unavailable"
+    blocked = None
+    errors = []
+    for gpu_id, item in gpus.items():
+        if item.get("pci") == GPU_PCI:
+            blocked = item.get("blocked")
+            try:
+                gpu_power = run("/usr/bin/cardwire", "gpu", str(gpu_id), "--power")
+            except RuntimeError as error:
+                errors.append(str(error))
+    driver_power = read(f"/proc/driver/nvidia/gpus/{GPU_PCI}/power")
+    memory = next((line.split(":", 1)[1].strip() for line in driver_power.splitlines()
+                   if line.startswith("Video Memory:")), "unavailable")
+    pending = any(item["queued"] != -1 for item in firmware.values())
+    pending_gpu = None
+    if pending:
+        mux = firmware["gpu_mux_mode"]
+        target_mux = mux["queued"] if mux["queued"] != -1 else mux["active"]
+        if target_mux == 0:
+            pending_gpu = "ultimate"
+        else:
+            wanted = settings.get("gpu") if settings.get("mode") == "custom" else PRESETS.get(
+                settings.get("mode"), (None, None))[1]
+            pending_gpu = wanted if wanted in {"integrated", "hybrid"} else "hybrid"
+    cpu = next((name for name, value in CPU_PROFILES.items() if value == profile), "unknown")
+    return {
+        "ac": ac, "intent": settings, "cpu_mode": cpu, "profile": profile,
+        "platform_profile": read("/sys/firmware/acpi/platform_profile"),
+        "cpu_epp": read("/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference"),
+        "firmware": firmware, "cardwire_mode": mode, "gpu_mode": active_gpu,
+        "display_gpu": "NVIDIA" if nvidia_panel else "Intel" if intel_panel else "unknown",
+        "gpu_blocked": blocked, "gpu_power": gpu_power, "video_memory": memory,
+        "power_off_verified": gpu_power.lower() == "d3cold" and memory == "Off",
+        "pending_reboot": pending, "pending_gpu": pending_gpu, "errors": errors,
+        "selection": {"cpu": cpu, "gpu": pending_gpu or active_gpu},
+    }
+
+
+def status():
+    data = snapshot()
+    print(f"AC: {'connected' if data['ac'] else 'disconnected'}")
+    print(f"Requested policy: {data['intent'].get('mode', 'not set')}")
+    print(f"Fedora profile: {data['profile']}")
+    print(f"ASUS platform profile: {data['platform_profile']}")
+    print(f"CPU EPP: {data['cpu_epp']}")
+    for name, values in data["firmware"].items():
+        print(f"{name}: active={values['active']}, queued={values['queued']}")
+    print(f"Cardwire mode: {run('/usr/bin/cardwire', 'get')}")
+    print(f"Display/default GPU: {data['display_gpu']}")
+    print(f"RTX 3050 access blocked: {data['gpu_blocked']}")
+    print(f"RTX 3050 PCI power state (daemon read): {data['gpu_power']}")
+    for function in ("0", "1"):
+        base = f"/sys/bus/pci/devices/0000:01:00.{function}"
+        print(f"PCI function {function}: runtime={read(base + '/power/runtime_status')}, "
+              f"power={read(base + '/power_state')}")
+    print("Direct PCI reads can be blocked by Cardwire even for root; unreadable is not off.")
+    print("NVIDIA driver power information:")
+    print(read(f"/proc/driver/nvidia/gpus/{GPU_PCI}/power"))
+    print("GPU main power and VRAM off: " + ("VERIFIED" if data["power_off_verified"] else "NOT VERIFIED"))
+    print("Refresh policy: keep 144 Hz; verify the active mode with kscreen-doctor -o")
+
+
+def apply(requested, cpu=None, gpu=None):
+    with open("/run/asus-power-mode.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        ac = on_ac()
+        mode, cpu, gpu = resolve_request(requested, state(), ac, cpu, gpu)
+        if run("/usr/bin/systemctl", "is-active", "asus-shutdown.service") != "active":
+            raise RuntimeError("ASUS deferred shutdown helper is not running; refusing MUX request")
+        set_profile(cpu)
+        apply_gpu(gpu)
+        if ac and not on_ac():
+            print("AC disconnected during the request; applying the automatic battery policy.")
+            mode, cpu, gpu, ac = "battery", "silent", "integrated", False
+            set_profile(cpu)
+            apply_gpu(gpu)
+        pending = {name: attr(name, "QueuedGpuValue")
+                   for name in ("dgpu_disable", "gpu_mux_mode")}
+        if gpu == "ultimate" and all(value == -1 for value in pending.values()):
+            if not nvidia_drives_panel(gpu_map()):
+                raise RuntimeError("Firmware reports Ultimate but NVIDIA is not the display/default GPU")
+        save_state(mode, ac, cpu, gpu)
+        print(f"Requested {mode}: CPU {cpu}, GPU {gpu}; Fedora profile "
+              f"{run('/usr/bin/powerprofilesctl', 'get')}.")
+        if any(value != -1 for value in pending.values()):
+            print("REBOOT REQUIRED: ASUS firmware request is queued for orderly shutdown.")
+            print("Save your work and reboot when ready. No reboot was initiated.")
+        else:
+            print("Requested firmware routing is already active.")
+        print("Run asus-power-mode status for GPU power-state evidence; a mode label alone is not proof.")
+
+
+def main():
+    mode = ALIASES.get(Path(sys.argv[0]).name)
+    args = sys.argv[1:]
+    cpu = gpu = None
+    if mode is None:
+        if args and args[0] == "custom" and len(args) == 3:
+            mode, cpu, gpu = args
+            if cpu not in CPU_PROFILES or gpu not in GPU_MODES:
+                raise RuntimeError("Invalid CPU/GPU selection")
+        elif len(args) == 1 and args[0] in MODES - {"custom"}:
+            mode = args[0]
+        else:
+            print("Usage: asus-power-mode {gaming|battery|normal|status|status-json|auto}\n"
+                  "       asus-power-mode custom {silent|balanced|performance} "
+                  "{integrated|hybrid|ultimate}", file=sys.stderr)
+            return 2
+    elif args:
+        print("This command takes no arguments", file=sys.stderr)
+        return 2
+    if mode == "status":
+        status()
+    elif mode == "status-json":
+        print(json.dumps(snapshot()))
+    else:
+        if mode != "auto":
+            resolve_request(mode, {}, on_ac(), cpu, gpu)
+        if os.geteuid() != 0:
+            elevation = ["pkexec", SELF, mode]
+            if mode == "custom":
+                elevation.extend((cpu, gpu))
+            os.execv("/usr/bin/pkexec", elevation)
+        apply(mode, cpu, gpu)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print(f"ASUS power policy failed: {error}", file=sys.stderr)
+        sys.exit(1)

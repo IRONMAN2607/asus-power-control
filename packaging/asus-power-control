@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/python3 "${XDG_DATA_HOME:-$HOME/.local/share}/asus-power-control/asus_power_control.py" "$@"
