@@ -4,6 +4,8 @@ A small Linux/KDE application with independent **CPU performance** and **GPU
 mode** selectors, a **60–100% battery charge-limit slider**, and the boot/AC/battery
 policy needed to reinstall the setup.
 
+Press **Ctrl+Alt+S** to toggle the Armoury-style realtime system-monitor OSD.
+
 Built and verified on an **ASUS TUF Dash F15 FX517ZC**, Intel i5-12450H + NVIDIA
 RTX 3050 Laptop GPU, running **Fedora 44 KDE Wayland**.
 
@@ -47,6 +49,24 @@ The slider initializes from the actual ASUS limit. Loading the app or moving
 the slider does not change charging until you save. Lowering the cap stops
 further charging; it does not discharge a battery already above that value.
 
+## System monitor OSD
+
+Press **Ctrl+Alt+S** to show or hide a subtle top-left overlay. It updates once per
+second and reports CPU temperature/usage, RAM usage, CPU power when the kernel
+exposes unprivileged RAPL energy data, GPU temperature/usage, VRAM usage, GPU
+power draw, optional GPU voltage, and FPS.
+
+The RTX telemetry path uses Cardwire first. If the GPU is blocked or in D3cold,
+the OSD does not run `nvidia-smi`; it reports the dGPU as blocked/off instead of
+waking it. When Hybrid or Ultimate makes NVIDIA available, querying live NVIDIA
+telemetry can keep the dGPU awake while the OSD is visible.
+
+NVIDIA's Linux driver does not expose a reliable system-wide game FPS value to a
+separate Wayland application. FPS therefore displays `N/A` unless an external
+game overlay supplies a numeric file through `ASUS_POWER_CONTROL_FPS_FILE`.
+The OSD does not confuse the 144 Hz display refresh rate with game FPS. Voltage
+is shown when `nvidia-settings` exposes it and otherwise displays `N/A`.
+
 ## Reinstall after reinstalling Linux
 
 ### 1. Install the underlying system tools
@@ -58,7 +78,7 @@ Boot, package replacements, and the required services.
 Required packages:
 
 ```bash
-sudo dnf install --setopt=install_weak_deps=False asusctl cardwire power-profiles-daemon python3-pyside6 \
+sudo dnf install --setopt=install_weak_deps=False asusctl cardwire power-profiles-daemon python3-pyside6 python3-psutil \
     polkit upower desktop-file-utils
 ```
 
@@ -106,6 +126,8 @@ limits; use the GUI slider to save your preferred limit afterward.
 
 ```text
 asus_power_control.py       Unprivileged Qt 6 GUI
+monitoring.py               Read-only CPU/RAM/GPU telemetry collector
+osd.py                      Armoury-style transparent telemetry OSD
 backend/asus-power-mode     Privileged policy/status helper
 install.py                  Installer, dry run, and backup restoration
 packaging/                  Desktop entry, launcher, and system configuration
@@ -168,6 +190,7 @@ retains the first pre-install backups rather than replacing them on each update.
 - [Using the GUI and CLI](docs/usage.md)
 - [Architecture and configuration ownership](docs/architecture.md)
 - [Hardware verification record](docs/verification.md)
+- [OSD telemetry notes](docs/architecture.md#system-monitor-osd)
 
 This project integrates upstream [asusctl](https://github.com/OpenGamingCollective/asusctl),
 [Cardwire](https://github.com/OpenGamingCollective/cardwire),

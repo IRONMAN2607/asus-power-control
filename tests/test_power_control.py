@@ -21,6 +21,8 @@ sys.path.insert(0, str(ROOT))
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QByteArray, QProcess
 from asus_power_control import MainWindow
+from monitoring import Metrics
+from osd import MonitorOSD
 
 
 class Hardware:
@@ -377,6 +379,38 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(self.window.charge_dirty)
         self.assertEqual(self.window.charge_slider.value(), 80)
         self.assertIn("70%", self.window.current_charge.text())
+
+
+class OSDTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        self.osd = MonitorOSD()
+        self.addCleanup(self.osd.close)
+
+    def test_osd_displays_cpu_gpu_memory_power_voltage_and_fps_fields(self):
+        metrics = Metrics(cpu_usage=23, cpu_temperature=71, cpu_power=18.5,
+                          memory_used=4 * 1024**3, memory_total=16 * 1024**3,
+                          memory_percent=25, gpu_state="Active", gpu_temperature=55,
+                          gpu_usage=42, gpu_memory_usage=12, vram_used=500,
+                          vram_total=4096, gpu_power=45.5, gpu_voltage=None,
+                          fps=None, fps_note="N/A — a game overlay is required for per-game FPS")
+        self.osd.display(metrics)
+        self.assertEqual(self.osd.rows["cpu_temperature"].text(), "71 °C")
+        self.assertEqual(self.osd.rows["cpu_usage"].text(), "23%")
+        self.assertEqual(self.osd.rows["gpu_temperature"].text(), "55 °C")
+        self.assertEqual(self.osd.rows["gpu_power"].text(), "45.5 W")
+        self.assertEqual(self.osd.rows["gpu_voltage"].text(), "N/A")
+        self.assertEqual(self.osd.rows["fps"].text(), "N/A")
+        self.assertIn("12%", self.osd.rows["vram"].text())
+
+    def test_blocked_gpu_display_is_explicit(self):
+        metrics = Metrics(gpu_state="Off (D3cold)", gpu_note="NVIDIA telemetry is intentionally skipped")
+        self.osd.display(metrics)
+        self.assertEqual(self.osd.rows["gpu_state"].text(), "Off (D3cold)")
+        self.assertIn("intentionally skipped", self.osd.note.text())
 
 
 if __name__ == "__main__":

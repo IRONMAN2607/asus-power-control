@@ -60,7 +60,7 @@ If either old package is absent, install the new package normally instead of
 running the corresponding swap. Then install the remaining dependencies:
 
 ```bash
-sudo dnf install --setopt=install_weak_deps=False git asusctl cardwire power-profiles-daemon python3-pyside6 \
+sudo dnf install --setopt=install_weak_deps=False git asusctl cardwire power-profiles-daemon python3-pyside6 python3-psutil \
     polkit upower desktop-file-utils
 ```
 

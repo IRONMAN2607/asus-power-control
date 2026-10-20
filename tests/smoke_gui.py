@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 from asus_power_control import MainWindow
+from osd import MonitorOSD
 
 
 def main():
@@ -16,12 +17,17 @@ def main():
     action.add_argument("--apply-current", action="store_true")
     action.add_argument("--save-current-charge-limit", action="store_true")
     parser.add_argument("--screenshot")
+    parser.add_argument("--osd", action="store_true")
     options = parser.parse_args()
     app = QApplication([])
     app.setApplicationName("ASUS Power Control")
     app.setDesktopFileName("org.local.AsusPowerControl")
     window = MainWindow()
     window.show()
+    osd = MonitorOSD(window) if options.osd else None
+    if osd is not None:
+        window.hide()
+        osd.show()
     phase = {"started": False, "applied": False, "cpu": None, "gpu": None, "charge_limit": None}
 
     def finish(code, message):
@@ -73,7 +79,8 @@ def main():
             if (data["cpu_mode"], data["gpu_mode"]) != (phase["cpu"], phase["gpu"]):
                 finish(1, "The power source or modes changed during the live test; inspect status.")
                 return
-        if options.screenshot and not window.grab().save(options.screenshot):
+        screenshot_target = osd if osd is not None else window
+        if options.screenshot and not screenshot_target.grab().save(options.screenshot):
             finish(1, "Could not save the GUI preview.")
             return
         finish(0, f"GUI smoke test passed on {app.platformName()}: "

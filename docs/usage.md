@@ -8,6 +8,10 @@ Open **ASUS Power Control** from the KDE application launcher, or run:
 asus-power-control
 ```
 
+Press **Ctrl+Alt+S** at any time to toggle the realtime system-monitor OSD.
+The shortcut is registered through the KDE desktop entry and works whether the
+main application window is open or closed.
+
 Choose a **CPU mode** and **GPU mode**, then click **Apply**:
 
 | CPU mode | Power Profiles Daemon | ASUS platform profile |
@@ -24,6 +28,30 @@ Choose a **CPU mode** and **GPU mode**, then click **Apply**:
 
 The selectors are independent: e.g. Balanced + Integrated or Silent + Hybrid.
 Changing a GPU selection does not force a particular CPU profile.
+
+## System monitor OSD
+
+The click-through OSD appears in the top-left corner with a subdued transparent
+panel and refreshes once per
+second. It shows:
+
+- CPU temperature and usage
+- CPU power when unprivileged RAPL is readable; otherwise `N/A`
+- RAM usage
+- GPU temperature, utilization and power draw
+- VRAM percentage and used/total memory
+- GPU voltage when `nvidia-settings` exposes it; otherwise `N/A`
+- FPS when an external FPS source is configured
+
+In Integrated mode, Cardwire blocks NVIDIA polling and the OSD reports the GPU
+as blocked/off without waking it. In Hybrid or Ultimate, live NVIDIA telemetry
+may keep the dGPU active while the OSD is visible. KDE/NVIDIA do not provide a
+reliable system-wide game FPS value to this separate Wayland app, so the default
+FPS display is `N/A`. An overlay can provide a numeric file by setting:
+
+```sh
+export ASUS_POWER_CONTROL_FPS_FILE=/path/to/current-fps.txt
+```
 
 ## Battery charge limit
 
@@ -115,8 +143,9 @@ QT_QPA_PLATFORM=offscreen python3 -m unittest discover -s ~/.local/share/asus-po
 
 ## GUI verification — 2026-10-05
 
-- All 18 policy/UI tests passed, including independent mode combinations,
-  source-change handling, deferred-request cancellation, and active/pending routing.
+- All 50 policy, telemetry, UI, and installer tests passed, including independent
+  mode combinations, source-change handling, deferred-request cancellation,
+  active/pending routing, and OSD rendering.
 - The app launched and rendered successfully in the actual KDE Wayland session.
 - Live GUI Apply successfully reapplied the current Performance + Hybrid pair
   through the installed privileged helper and stored the custom policy.

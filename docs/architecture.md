@@ -18,6 +18,26 @@
 The application closes without affecting the boot/AC policy. Its five-second
 read-only status refresh runs only while the GUI is open.
 
+## System monitor OSD
+
+The application registers the KDE desktop shortcut `Ctrl+Alt+S`. KDE invokes the
+same launcher with `--toggle-osd`; a local Qt socket toggles the OSD in the
+already-running application, so the hotkey does not create duplicate windows.
+If the application is not running, the shortcut starts it directly into the OSD.
+
+The OSD is a click-through, top-left, subdued-transparent, always-on-top Wayland window. It samples
+once per second only while visible. CPU/RAM telemetry uses psutil and Linux
+hwmon; CPU package power uses unprivileged Intel RAPL only when its energy file
+is readable. On this Secure Boot system that file may be root-only, so CPU power
+is honestly shown as unavailable when necessary.
+
+For the NVIDIA GPU, Cardwire is queried before `nvidia-smi`. A blocked GPU is
+reported as Blocked/D3cold and NVIDIA polling is skipped. An available GPU is
+queried for temperature, utilization, VRAM, clocks and power draw. Voltage is an
+optional best-effort `nvidia-settings` value. Game FPS is not a universal KDE
+Wayland metric; the OSD displays N/A unless `ASUS_POWER_CONTROL_FPS_FILE` points
+to a file containing a numeric FPS value supplied by a game overlay.
+
 ## Independent choices
 
 The GUI submits a fixed argument array to the root-owned helper:

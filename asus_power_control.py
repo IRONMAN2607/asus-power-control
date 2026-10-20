@@ -7,10 +7,15 @@ import sys
 
 from PySide6.QtCore import QProcess, QTimer, Qt
 from PySide6.QtGui import QIcon
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
     QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
 )
+
+from osd import MonitorOSD
+
+CONTROL_SOCKET = "asus-power-control-control"
 
 CPU_NAMES = {"silent": "Silent", "balanced": "Balanced", "performance": "Performance"}
 GPU_NAMES = {"integrated": "Integrated", "hybrid": "Hybrid", "ultimate": "Ultimate (Dedicated)"}
@@ -359,9 +364,54 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("ASUS Power Control")
     app.setDesktopFileName("org.local.AsusPowerControl")
+    toggle_osd = "--toggle-osd" in sys.argv[1:]
+    if send_control("toggle-osd" if toggle_osd else "show-main"):
+        return 0
     window = MainWindow()
-    window.show()
+    osd = MonitorOSD(window)
+    control = QLocalServer(window)
+    QLocalServer.removeServer(CONTROL_SOCKET)
+    if not control.listen(CONTROL_SOCKET):
+        # The application still works locally if KDE starts a stale duplicate.
+        control = None
+
+    def handle_connection():
+        socket = control.nextPendingConnection()
+
+        def command_received():
+            command = bytes(socket.readAll()).decode("utf-8", errors="replace").strip()
+            if command == "toggle-osd":
+                osd.toggle()
+            elif command == "show-main":
+                window.showNormal()
+                window.raise_()
+                window.activateWindow()
+            socket.disconnectFromServer()
+
+        socket.readyRead.connect(command_received)
+        socket.disconnected.connect(socket.deleteLater)
+
+    if control is not None:
+        control.newConnection.connect(handle_connection)
+    if toggle_osd:
+        osd.show()
+        osd.update_metrics()
+        osd.timer.start()
+    else:
+        window.show()
     return app.exec()
+
+
+def send_control(command):
+    socket = QLocalSocket()
+    socket.connectToServer(CONTROL_SOCKET)
+    if not socket.waitForConnected(250):
+        return False
+    socket.write(command.encode("utf-8"))
+    socket.flush()
+    socket.waitForBytesWritten(250)
+    socket.disconnectFromServer()
+    return True
 
 
 if __name__ == "__main__":

@@ -18,3 +18,4 @@ manifest.json
 backups/
 *.before-*
 *-preview.png
+*.sock

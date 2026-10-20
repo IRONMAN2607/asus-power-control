@@ -29,9 +29,9 @@ SYSTEM_FILES = {
     "docs/verification.md": ("/usr/local/share/asus-power-control/verification.md", 0o644),
 }
 USER_PAYLOAD = (
-    "asus_power_control.py", "icon.svg", "README.md", "requirements.txt", "install.py",
+    "asus_power_control.py", "monitoring.py", "osd.py", "icon.svg", "README.md", "requirements.txt", "install.py",
     "backend/asus-power-mode", "tests/test_power_control.py", "tests/smoke_gui.py",
-    "tests/test_install.py", "docs/usage.md", "docs/architecture.md",
+    "tests/test_install.py", "tests/test_monitoring.py", "docs/usage.md", "docs/architecture.md",
     "docs/reinstall-fedora.md", "docs/verification.md",
     "packaging/asus-power-control", "packaging/org.local.AsusPowerControl.desktop.in",
     "packaging/asus-power-source.service", "packaging/cardwire.toml",
@@ -247,6 +247,8 @@ def preflight(system=False):
         raise RuntimeError("Run the installer from your KDE Wayland desktop session")
     if importlib.util.find_spec("PySide6") is None:
         raise RuntimeError("Install python3-pyside6 first; see docs/reinstall-fedora.md")
+    if importlib.util.find_spec("psutil") is None:
+        raise RuntimeError("Install python3-psutil first; see docs/reinstall-fedora.md")
     for name in ("asusctl", "cardwire", "powerprofilesctl", "busctl", "systemctl", "pkexec"):
         if not shutil.which(name):
             raise RuntimeError(f"Missing command: {name}; see docs/reinstall-fedora.md")

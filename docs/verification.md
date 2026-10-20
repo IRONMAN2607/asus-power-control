@@ -53,13 +53,26 @@ never blocking NVIDIA while it still drives the internal panel.
 ## Charge-limit slider verification — 2026-10-06
 
 - The slider range is **60–100%**, with 1% steps and a separate Save limit action.
-- All **42 policy, UI, and installer tests passed**, including invalid-input
+- All **50 policy, telemetry, UI, and installer tests passed**, including invalid-input
   rejection, readback failures, cancelled authentication, and independent controls.
 - A live Wayland GUI save successfully reapplied the existing **70%** cap.
 - ASUS D-Bus, the battery's kernel threshold, and `asusctl battery info` all
   reported 70%; asusd's stored current and base charge limits both remained 70%.
 - Performance/Hybrid intent, Intel display routing, and idle RTX D3cold/VRAM Off
   were observed after saving, with no pending firmware change.
+
+## System-monitor OSD verification — 2026-10-21
+
+- Added a click-through, subdued-transparent, top-left, always-on-top OSD toggled
+  by **Ctrl+Alt+S**.
+- OSD refreshes once per second and displays CPU temperature/usage, RAM usage,
+  GPU temperature/usage, VRAM usage, GPU power, optional voltage, and FPS state.
+- The telemetry parser and OSD rendering tests pass without changing hardware.
+- Cardwire-blocked GPU handling skips `nvidia-smi`, preserving D3cold instead of
+  intentionally waking the RTX. Available Hybrid/Ultimate telemetry may keep the
+  GPU active while the OSD is visible.
+- System-wide game FPS and CPU voltage are not exposed reliably by this Wayland
+  stack; the OSD reports N/A for those values unless an external source is set.
 
 ## Check a reinstalled system
 
