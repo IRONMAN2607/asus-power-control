@@ -412,6 +412,19 @@ class OSDTests(unittest.TestCase):
         self.assertEqual(self.osd.rows["gpu_state"].text(), "Off (D3cold)")
         self.assertIn("intentionally skipped", self.osd.note.text())
 
+    def test_metric_filters_hide_selected_rows_without_affecting_collection(self):
+        self.osd.set_filters({
+            "cpu_basic": True, "cpu_power": False, "memory": False,
+            "gpu_basic": True, "gpu_memory": False, "gpu_power": False, "fps": False,
+        })
+        self.assertFalse(self.osd.rows["cpu_temperature"].isHidden())
+        self.assertTrue(self.osd.rows["cpu_power"].isHidden())
+        self.assertTrue(self.osd.rows["memory"].isHidden())
+        self.assertFalse(self.osd.rows["gpu_temperature"].isHidden())
+        self.assertTrue(self.osd.rows["vram"].isHidden())
+        self.assertTrue(self.osd.rows["gpu_power"].isHidden())
+        self.assertTrue(self.osd.rows["fps"].isHidden())
+
 
 if __name__ == "__main__":
     unittest.main()

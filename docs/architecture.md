@@ -21,9 +21,13 @@ read-only status refresh runs only while the GUI is open.
 ## System monitor OSD
 
 The application registers the KDE desktop shortcut `Ctrl+Alt+S`. KDE invokes the
-same launcher with `--toggle-osd`; a local Qt socket toggles the OSD in the
-already-running application, so the hotkey does not create duplicate windows.
-If the application is not running, the shortcut starts it directly into the OSD.
+hidden OSD desktop entry with `--toggle-osd`; a local Qt socket toggles the OSD
+in the already-running application, so the hotkey does not create duplicate
+windows. If the application is not running, the shortcut starts it directly into
+the OSD. The normal ASUS Power Control desktop entry has no OSD argument and
+always opens the main control window.
+
+The main window exposes the same toggle and persistent metric-group filters.
 
 The OSD is a click-through, top-left, subdued-transparent, always-on-top Wayland window. It samples
 once per second only while visible. CPU/RAM telemetry uses psutil and Linux

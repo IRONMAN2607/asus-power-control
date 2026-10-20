@@ -74,6 +74,15 @@ class ConfigurationTests(unittest.TestCase):
         for filename in installer.USER_PAYLOAD:
             self.assertTrue((ROOT / filename).is_file(), filename)
 
+    def test_osd_desktop_entry_is_hidden_and_uses_the_toggle_argument(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = installer.desktop_entry(Path(directory) / "asus-power-control",
+                                            Path(directory) / "icon.svg",
+                                            "packaging/org.local.AsusPowerControlOSD.desktop.in")
+            self.assertIn("NoDisplay=true", entry)
+            self.assertIn("--toggle-osd", entry)
+            self.assertIn("X-KDE-Shortcuts=Ctrl+Alt+S", entry)
+
 
 class BackupTests(unittest.TestCase):
     def setUp(self):

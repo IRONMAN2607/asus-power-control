@@ -24,6 +24,16 @@ def vram_value(used, total):
 
 
 class MonitorOSD(QWidget):
+    DEFAULT_FILTERS = {
+        "cpu_basic": True,
+        "cpu_power": True,
+        "memory": True,
+        "gpu_basic": True,
+        "gpu_memory": True,
+        "gpu_power": True,
+        "fps": True,
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.collector = TelemetryCollector()
@@ -64,21 +74,23 @@ class MonitorOSD(QWidget):
         self.grid.setVerticalSpacing(5)
         panel_layout.addLayout(self.grid)
         self.rows = {}
+        self.sections = {}
+        self.row_groups = {}
         self._section("CPU")
-        self._row("Temperature", "cpu_temperature")
-        self._row("Usage", "cpu_usage")
-        self._row("Power draw", "cpu_power")
-        self._row("Voltage", "cpu_voltage")
+        self._row("Temperature", "cpu_temperature", "cpu_basic")
+        self._row("Usage", "cpu_usage", "cpu_basic")
+        self._row("Power draw", "cpu_power", "cpu_power")
+        self._row("Voltage", "cpu_voltage", "cpu_power")
         self._section("MEMORY")
-        self._row("RAM", "memory")
+        self._row("RAM", "memory", "memory")
         self._section("GPU")
-        self._row("State", "gpu_state")
-        self._row("Temperature", "gpu_temperature")
-        self._row("Usage", "gpu_usage")
-        self._row("VRAM", "vram")
-        self._row("Power draw", "gpu_power")
-        self._row("Voltage", "gpu_voltage")
-        self._row("FPS", "fps")
+        self._row("State", "gpu_state", "gpu_basic")
+        self._row("Temperature", "gpu_temperature", "gpu_basic")
+        self._row("Usage", "gpu_usage", "gpu_basic")
+        self._row("VRAM", "vram", "gpu_memory")
+        self._row("Power draw", "gpu_power", "gpu_power")
+        self._row("Voltage", "gpu_voltage", "gpu_power")
+        self._row("FPS", "fps", "fps")
         self.note = QLabel("Waiting for telemetry…")
         self.note.setObjectName("subtitle")
         self.note.setWordWrap(True)
@@ -93,8 +105,9 @@ class MonitorOSD(QWidget):
         label = QLabel(text)
         label.setObjectName("section")
         self.grid.addWidget(label, row, 0, 1, 2)
+        self.sections[text] = label
 
-    def _row(self, name, key):
+    def _row(self, name, key, group):
         row = self.grid.rowCount()
         name_label = QLabel(name)
         name_label.setObjectName("name")
@@ -104,6 +117,28 @@ class MonitorOSD(QWidget):
         self.grid.addWidget(name_label, row, 0)
         self.grid.addWidget(metric, row, 1)
         self.rows[key] = metric
+        self.row_groups[key] = group
+
+    def set_filters(self, filters):
+        filters = {**self.DEFAULT_FILTERS, **(filters or {})}
+        for key, metric in self.rows.items():
+            visible = bool(filters.get(self.row_groups[key], True))
+            metric.setVisible(visible)
+            index = self.grid.indexOf(metric)
+            row, _column, _row_span, _column_span = self.grid.getItemPosition(index)
+            label = self.grid.itemAtPosition(row, 0)
+            if label is not None and label.widget() is not None:
+                label.widget().setVisible(visible)
+        for section_name, section in self.sections.items():
+            section_groups = {
+                "CPU": {"cpu_basic", "cpu_power"},
+                "MEMORY": {"memory"},
+                "GPU": {"gpu_basic", "gpu_memory", "gpu_power", "fps"},
+            }[section_name]
+            section.setVisible(any(filters.get(group, True) for group in section_groups))
+        self.adjustSize()
+        if self.isVisible():
+            self._position()
 
     def _position(self):
         screen = self.screen()

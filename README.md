@@ -5,6 +5,8 @@ mode** selectors, a **60–100% battery charge-limit slider**, and the boot/AC/b
 policy needed to reinstall the setup.
 
 Press **Ctrl+Alt+S** to toggle the Armoury-style realtime system-monitor OSD.
+Launching **ASUS Power Control** itself opens the normal control window; it does
+not open the OSD.
 
 Built and verified on an **ASUS TUF Dash F15 FX517ZC**, Intel i5-12450H + NVIDIA
 RTX 3050 Laptop GPU, running **Fedora 44 KDE Wayland**.
@@ -55,6 +57,11 @@ Press **Ctrl+Alt+S** to show or hide a subtle top-left overlay. It updates once 
 second and reports CPU temperature/usage, RAM usage, CPU power when the kernel
 exposes unprivileged RAPL energy data, GPU temperature/usage, VRAM usage, GPU
 power draw, optional GPU voltage, and FPS.
+
+The main app also has a **Show OSD / Hide OSD** button and checkboxes for CPU
+temperature/usage, CPU power/voltage, RAM, GPU temperature/usage, VRAM, GPU
+power/voltage, and FPS. The selected filter groups are saved locally with the
+GUI settings.
 
 The RTX telemetry path uses Cardwire first. If the GPU is blocked or in D3cold,
 the OSD does not run `nvidia-smi`; it reports the dGPU as blocked/off instead of

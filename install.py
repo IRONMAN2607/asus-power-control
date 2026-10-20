@@ -34,6 +34,7 @@ USER_PAYLOAD = (
     "tests/test_install.py", "tests/test_monitoring.py", "docs/usage.md", "docs/architecture.md",
     "docs/reinstall-fedora.md", "docs/verification.md",
     "packaging/asus-power-control", "packaging/org.local.AsusPowerControl.desktop.in",
+    "packaging/org.local.AsusPowerControlOSD.desktop.in",
     "packaging/asus-power-source.service", "packaging/cardwire.toml",
     "packaging/asusd-policy.json", "packaging/60-cardwire-logging.conf",
     "packaging/80-asus-gpu-shutdown.conf", "packaging/60-powerdevil-ddc-workaround.conf",
@@ -222,11 +223,11 @@ def user_paths():
     return home, data, config, state
 
 
-def desktop_entry(launcher, icon):
+def desktop_entry(launcher, icon, template="packaging/org.local.AsusPowerControl.desktop.in"):
     # Exec has a separate quoting grammar; percent must not become a field code.
     executable = str(launcher).replace("\\", "\\\\\\\\").replace('"', '\\\\"')
     executable = executable.replace("$", "\\\\$").replace("`", "\\\\`").replace("%", "%%")
-    return (ROOT / "packaging/org.local.AsusPowerControl.desktop.in").read_text().replace(
+    return (ROOT / template).read_text().replace(
         "@EXEC@", '"' + executable + '"').replace("@ICON@", str(icon))
 
 
@@ -366,6 +367,9 @@ def install_user(options):
     changes.write(launcher, (ROOT / "packaging/asus-power-control").read_bytes(), 0o755)
     desktop = data / "applications/org.local.AsusPowerControl.desktop"
     changes.write(desktop, desktop_entry(launcher, app_dir / "icon.svg"))
+    osd_desktop = data / "applications/org.local.AsusPowerControlOSD.desktop"
+    changes.write(osd_desktop, desktop_entry(
+        launcher, app_dir / "icon.svg", "packaging/org.local.AsusPowerControlOSD.desktop.in"))
     powerdevil = config / "powerdevilrc"
     content = powerdevil.read_text() if powerdevil.exists() else ""
     groups = {f"{source}][Performance": {"PowerProfile": ""}

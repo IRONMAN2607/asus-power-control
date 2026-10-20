@@ -12,6 +12,9 @@ Press **Ctrl+Alt+S** at any time to toggle the realtime system-monitor OSD.
 The shortcut is registered through the KDE desktop entry and works whether the
 main application window is open or closed.
 
+Launching **ASUS Power Control** from KDE opens the normal control window. The
+OSD is controlled from its **Show OSD / Hide OSD** button or with Ctrl+Alt+S.
+
 Choose a **CPU mode** and **GPU mode**, then click **Apply**:
 
 | CPU mode | Power Profiles Daemon | ASUS platform profile |
@@ -42,6 +45,10 @@ second. It shows:
 - VRAM percentage and used/total memory
 - GPU voltage when `nvidia-settings` exposes it; otherwise `N/A`
 - FPS when an external FPS source is configured
+
+Use the OSD filter checkboxes in the main window to choose which groups appear:
+CPU temperature/usage, CPU power/voltage, RAM, GPU temperature/usage, VRAM, GPU
+power/voltage, and FPS. These filter choices are saved for the next launch.
 
 In Integrated mode, Cardwire blocks NVIDIA polling and the OSD reports the GPU
 as blocked/off without waking it. In Hybrid or Ultimate, live NVIDIA telemetry

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ASUS Power Control OSD
+Comment=Toggle the ASUS realtime system monitor OSD
+Exec=@EXEC@ --toggle-osd
+Icon=@ICON@
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+X-KDE-Shortcuts=Ctrl+Alt+S

@@ -5,12 +5,12 @@ import json
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QProcess, QTimer, Qt
+from PySide6.QtCore import QProcess, QSettings, QTimer, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
+    QLabel, QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
 )
 
 from osd import MonitorOSD
@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self.apply_action = None
         self.syncing = False
         self.last_output = ""
+        self.settings = QSettings("ASUS", "PowerControl")
         self.setWindowTitle("ASUS Power Control")
         self.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.svg"))))
         self.resize(650, 760)
@@ -109,6 +110,42 @@ class MainWindow(QMainWindow):
         charge_note.setWordWrap(True)
         charge_layout.addWidget(charge_note)
         layout.addWidget(charge_group)
+
+        osd_group = QGroupBox("System monitor OSD")
+        osd_layout = QVBoxLayout(osd_group)
+        osd_header = QHBoxLayout()
+        osd_header.addWidget(QLabel("Realtime display"))
+        osd_header.addStretch()
+        self.osd_button = QPushButton("Show OSD")
+        self.osd_button.clicked.connect(self.toggle_osd)
+        osd_header.addWidget(self.osd_button)
+        osd_layout.addLayout(osd_header)
+        filter_label = QLabel("Show these metric groups in the OSD:")
+        filter_label.setWordWrap(True)
+        osd_layout.addWidget(filter_label)
+        filter_layout = QHBoxLayout()
+        self.osd_filters = {}
+        filter_names = (
+            ("cpu_basic", "CPU temp/usage"), ("cpu_power", "CPU power/voltage"),
+            ("memory", "RAM"), ("gpu_basic", "GPU temp/usage"),
+            ("gpu_memory", "VRAM"), ("gpu_power", "GPU power/voltage"),
+            ("fps", "FPS"),
+        )
+        for key, text in filter_names:
+            checkbox = QCheckBox(text)
+            checkbox.setChecked(self.settings.value(f"osd/{key}", True, type=bool))
+            checkbox.toggled.connect(lambda checked, group=key: self.osd_filter_changed(group, checked))
+            self.osd_filters[key] = checkbox
+            filter_layout.addWidget(checkbox)
+        filter_layout.addStretch()
+        osd_layout.addLayout(filter_layout)
+        osd_note = QLabel("Ctrl+Alt+S toggles the OSD from anywhere in KDE.")
+        osd_note.setWordWrap(True)
+        osd_layout.addWidget(osd_note)
+        layout.addWidget(osd_group)
+
+        self.osd = MonitorOSD(self)
+        self.osd.set_filters(self.current_osd_filters())
 
         state_group = QGroupBox("Live status")
         state_layout = QFormLayout(state_group)
@@ -190,6 +227,18 @@ class MainWindow(QMainWindow):
         if self.data is not None and not self.syncing:
             self.dirty = True
         self.update_controls()
+
+    def current_osd_filters(self):
+        return {key: checkbox.isChecked() for key, checkbox in self.osd_filters.items()}
+
+    def osd_filter_changed(self, group, checked):
+        self.settings.setValue(f"osd/{group}", checked)
+        if hasattr(self, "osd"):
+            self.osd.set_filters(self.current_osd_filters())
+
+    def toggle_osd(self):
+        self.osd.toggle()
+        self.osd_button.setText("Hide OSD" if self.osd.isVisible() else "Show OSD")
 
     def update_controls(self):
         valid = self.data is not None and not self.busy
@@ -357,6 +406,7 @@ class MainWindow(QMainWindow):
         if self.status_process.state() != QProcess.ProcessState.NotRunning:
             self.status_process.kill()
             self.status_process.waitForFinished(1000)
+        self.osd.close()
         event.accept()
 
 
@@ -368,7 +418,6 @@ def main():
     if send_control("toggle-osd" if toggle_osd else "show-main"):
         return 0
     window = MainWindow()
-    osd = MonitorOSD(window)
     control = QLocalServer(window)
     QLocalServer.removeServer(CONTROL_SOCKET)
     if not control.listen(CONTROL_SOCKET):
@@ -381,7 +430,7 @@ def main():
         def command_received():
             command = bytes(socket.readAll()).decode("utf-8", errors="replace").strip()
             if command == "toggle-osd":
-                osd.toggle()
+                window.toggle_osd()
             elif command == "show-main":
                 window.showNormal()
                 window.raise_()
@@ -394,9 +443,7 @@ def main():
     if control is not None:
         control.newConnection.connect(handle_connection)
     if toggle_osd:
-        osd.show()
-        osd.update_metrics()
-        osd.timer.start()
+        window.toggle_osd()
     else:
         window.show()
     return app.exec()

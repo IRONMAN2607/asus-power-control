@@ -65,6 +65,9 @@ never blocking NVIDIA while it still drives the internal panel.
 
 - Added a click-through, subdued-transparent, top-left, always-on-top OSD toggled
   by **Ctrl+Alt+S**.
+- Normal ASUS Power Control launch opens the main controls; the hidden OSD desktop
+  entry owns the Ctrl+Alt+S shortcut. The main window's Show OSD button and metric
+  filter checkboxes were verified.
 - OSD refreshes once per second and displays CPU temperature/usage, RAM usage,
   GPU temperature/usage, VRAM usage, GPU power, optional voltage, and FPS state.
 - The telemetry parser and OSD rendering tests pass without changing hardware.

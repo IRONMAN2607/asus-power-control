@@ -2,11 +2,10 @@
 Type=Application
 Name=ASUS Power Control
 Comment=Choose CPU performance and Integrated, Hybrid or Ultimate GPU modes
-Exec=@EXEC@ --toggle-osd
+Exec=@EXEC@
 Icon=@ICON@
 Terminal=false
 Categories=Settings;HardwareSettings;
 Keywords=ASUS;TUF;CPU;GPU;Power;Silent;Balanced;Performance;Integrated;Hybrid;Ultimate;
 StartupNotify=true
 StartupWMClass=org.local.AsusPowerControl
-X-KDE-Shortcuts=Ctrl+Alt+S
