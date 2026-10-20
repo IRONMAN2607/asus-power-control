@@ -24,7 +24,7 @@ def main():
     app.setDesktopFileName("org.local.AsusPowerControl")
     window = MainWindow()
     window.show()
-    osd = MonitorOSD(window) if options.osd else None
+    osd = MonitorOSD() if options.osd else None
     if osd is not None:
         window.hide()
         osd.show()

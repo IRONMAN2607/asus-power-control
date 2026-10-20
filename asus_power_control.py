@@ -144,7 +144,10 @@ class MainWindow(QMainWindow):
         osd_layout.addWidget(osd_note)
         layout.addWidget(osd_group)
 
-        self.osd = MonitorOSD(self)
+        # Keep the click-through OSD as an independent top-level window. Some
+        # PySide6/Qt runtimes otherwise report shared QObject deletion during
+        # application teardown when it is parented to the main window.
+        self.osd = MonitorOSD()
         self.osd.set_filters(self.current_osd_filters())
 
         state_group = QGroupBox("Live status")
